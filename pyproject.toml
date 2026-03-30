@@ -1,0 +1,93 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agent-forge"
+version = "0.1.0"
+description = "A long-horizon planning engine for LLM agents. Dedicated planning layer with HTN decomposition, MCTS search, and backtracking."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [
+    { name = "Sushaan Kandukoori", email = "sushaan@users.noreply.github.com" },
+]
+keywords = [
+    "llm",
+    "agents",
+    "planning",
+    "mcts",
+    "hierarchical-task-network",
+    "backtracking",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
+]
+dependencies = [
+    "pydantic>=2.0,<3.0",
+    "networkx>=3.0,<4.0",
+    "httpx>=0.25,<1.0",
+    "numpy>=1.24,<3.0",
+]
+
+[project.optional-dependencies]
+anthropic = ["anthropic>=0.30,<1.0"]
+openai = ["openai>=1.0,<2.0"]
+all = [
+    "anthropic>=0.30,<1.0",
+    "openai>=1.0,<2.0",
+]
+dev = [
+    "pytest>=8.0,<9.0",
+    "pytest-asyncio>=0.24,<1.0",
+    "pytest-cov>=4.0,<6.0",
+    "pytest-mock>=3.14,<4.0",
+    "ruff>=0.8,<1.0",
+    "mypy>=1.13,<2.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/sushaan-k/agent-forge"
+Repository = "https://github.com/sushaan-k/agent-forge"
+Issues = "https://github.com/sushaan-k/agent-forge/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agent_forge"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "integration: marks tests as integration tests",
+    "benchmark: marks tests as benchmark tests",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "A", "SIM", "RUF"]
+ignore = ["E501", "N818", "RUF012"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["agent_forge"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = ["networkx.*", "numpy.*"]
+ignore_missing_imports = true
