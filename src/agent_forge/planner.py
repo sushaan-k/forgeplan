@@ -421,9 +421,7 @@ class Planner:
                 if degraded and goal.success_criteria:
                     goal.mark_failed()
                     result.success = False
-                    result.error = (
-                        "Degraded mode cannot verify goal success criteria"
-                    )
+                    result.error = "Degraded mode cannot verify goal success criteria"
                     return result
                 goal.mark_completed()
                 logger.info(

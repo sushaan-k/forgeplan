@@ -155,7 +155,9 @@ class Executor:
         completed = 0
         verdicts: list[MonitorVerdict] = []
         flat_steps = self._flatten_steps(steps)
-        pending_steps = [step for step in flat_steps if step.status != StepStatus.INVALIDATED]
+        pending_steps = [
+            step for step in flat_steps if step.status != StepStatus.INVALIDATED
+        ]
         completed_ids: set[str] = set()
         known_step_ids = {step.id for step in pending_steps}
 
