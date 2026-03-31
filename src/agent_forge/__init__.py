@@ -27,7 +27,7 @@ from agent_forge.exceptions import (
     StateError,
     ToolError,
 )
-from agent_forge.executor import ExecutionResult, Executor, PlanStep
+from agent_forge.executor import ExecutionResult, Executor, PlanStep, StepResult
 from agent_forge.goal import Goal, GoalStatus
 from agent_forge.monitor import CheckResult, Monitor, MonitorVerdict
 from agent_forge.planner import Agent, MCTSSearch, Planner, SearchStrategy
@@ -39,9 +39,7 @@ __version__ = "0.1.0"
 
 __all__ = [
     "Agent",
-    # Exceptions
     "AgentForgeError",
-    # Backtracking
     "BacktrackEngine",
     "BacktrackError",
     "BacktrackEvent",
@@ -49,27 +47,22 @@ __all__ = [
     "Checkpoint",
     "ExecutionError",
     "ExecutionResult",
-    # Execution
     "Executor",
-    # Tools
     "FunctionTool",
     "Goal",
     "GoalStatus",
     "InvariantViolation",
     "MCPTool",
-    # Search
     "MCTSSearch",
     "ModelError",
-    # Monitoring
     "Monitor",
     "MonitorVerdict",
     "PlanStep",
-    # Core
     "Planner",
     "PlanningError",
     "SearchStrategy",
     "StateError",
-    # State
     "StateManager",
+    "StepResult",
     "ToolError",
 ]

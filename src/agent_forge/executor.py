@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import Callable
 from enum import StrEnum
 from typing import Any
 
@@ -93,6 +94,33 @@ class ExecutionResult(BaseModel):
     recoverable: bool = True
 
 
+class StepResult(BaseModel):
+    """Progress information emitted after each step completes.
+
+    Passed to the ``on_step_complete`` callback so callers can build
+    progress bars, structured logging, or streaming UIs.
+
+    Attributes:
+        step_id: Unique identifier of the completed step.
+        step_description: Human-readable description of the step.
+        step_index: 1-based index of the step within the plan.
+        steps_total: Total number of steps in the plan.
+        status: Resulting status of the step.
+        result: The step's output value (may be ``None``).
+    """
+
+    step_id: str
+    step_description: str
+    step_index: int
+    steps_total: int
+    status: StepStatus
+    result: Any = None
+
+
+# Type alias for the step-complete callback.
+OnStepComplete = Callable[[StepResult], None]
+
+
 class Executor:
     """Executes plan steps with monitoring and backtracking support.
 
@@ -138,6 +166,7 @@ class Executor:
         steps: list[PlanStep],
         invariants: list[str],
         max_steps: int | None = None,
+        on_step_complete: OnStepComplete | None = None,
     ) -> ExecutionResult:
         """Execute a list of plan steps in order.
 
@@ -147,6 +176,9 @@ class Executor:
         Args:
             steps: Ordered list of plan steps to execute.
             invariants: Global invariant conditions to enforce.
+            max_steps: Optional cap on completed steps.
+            on_step_complete: Optional callback invoked after each step
+                finishes with a :class:`StepResult` describing what happened.
 
         Returns:
             ExecutionResult with success status and details.
@@ -235,6 +267,18 @@ class Executor:
                 self._state_manager.advance_step()
                 completed += 1
                 completed_ids.add(step.id)
+
+                if on_step_complete is not None:
+                    on_step_complete(
+                        StepResult(
+                            step_id=step.id,
+                            step_description=step.description,
+                            step_index=completed,
+                            steps_total=total_steps,
+                            status=step.status,
+                            result=step.result,
+                        )
+                    )
 
                 self._steps_since_checkpoint += 1
                 if self._steps_since_checkpoint >= self._checkpoint_interval:
