@@ -16,7 +16,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from dataclasses import field as dc_field
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 
@@ -803,7 +803,7 @@ async def _mcts_strategy(
     planner: Any,
 ) -> list[PlanStep]:
     """Select the best plan using MCTS."""
-    return await planner._mcts.search(goal, candidates)
+    return cast(list[PlanStep], await planner._mcts.search(goal, candidates))
 
 
 async def _beam_strategy(
@@ -812,7 +812,7 @@ async def _beam_strategy(
     planner: Any,
 ) -> list[PlanStep]:
     """Select the best plan using beam search scoring."""
-    return await planner._beam_select(candidates, goal)
+    return cast(list[PlanStep], await planner._beam_select(candidates, goal))
 
 
 # Populate the registry with built-in strategies.

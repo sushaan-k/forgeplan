@@ -11,7 +11,7 @@ import logging
 import uuid
 from collections.abc import Callable
 from enum import StrEnum
-from typing import Any
+from typing import Any, TypedDict
 
 from pydantic import BaseModel, Field
 
@@ -150,6 +150,14 @@ class StepResult(BaseModel):
 OnStepComplete = Callable[[StepResult], None]
 
 
+class CostFields(TypedDict):
+    """Typed view of cost-tracking fields attached to execution results."""
+
+    total_tokens: int
+    total_cost_usd: float
+    model_calls: int
+
+
 class Executor:
     """Executes plan steps with monitoring and backtracking support.
 
@@ -215,6 +223,7 @@ class Executor:
         Returns:
             ExecutionResult with success status and details.
         """
+        self._reset_execution_counters()
         total_steps = self._count_steps(steps)
         completed = 0
         verdicts: list[MonitorVerdict] = []
@@ -473,13 +482,20 @@ class Executor:
         output_cost = completion_tokens * 15.0 / 1_000_000
         return round(input_cost + output_cost, 8)
 
-    def _cost_fields(self) -> dict[str, int | float]:
+    def _cost_fields(self) -> CostFields:
         """Return cost-tracking fields for inclusion in ExecutionResult."""
         return {
             "total_tokens": self._total_tokens,
             "total_cost_usd": self._total_cost_usd,
             "model_calls": self._model_calls,
         }
+
+    def _reset_execution_counters(self) -> None:
+        """Reset per-execution counters before a new plan run."""
+        self._total_tokens = 0
+        self._total_cost_usd = 0.0
+        self._model_calls = 0
+        self._steps_since_checkpoint = 0
 
     def _tool_schemas(self) -> list[dict[str, Any]]:
         """Return OpenAI-compatible schemas for all registered tools."""
