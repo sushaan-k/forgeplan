@@ -8,7 +8,13 @@ import pytest
 
 from agent_forge.executor import ExecutionResult
 from agent_forge.goal import Goal, GoalStatus
-from agent_forge.planner import Agent, Planner, SearchStrategy
+from agent_forge.planner import (
+    STRATEGY_REGISTRY,
+    Agent,
+    Planner,
+    SearchStrategy,
+    register_strategy,
+)
 from agent_forge.tools.mcp import MCPTool
 from tests.conftest import MockModel
 
@@ -215,3 +221,34 @@ class TestPlanner:
         assert "max_steps" in result.error
         assert result.recoverable is False
         assert goal.status == GoalStatus.FAILED
+
+
+class TestStrategyRegistry:
+    """Tests for the pluggable strategy registry."""
+
+    def test_builtin_strategies_registered(self) -> None:
+        """mcts and beam should be in the registry at import time."""
+        assert "mcts" in STRATEGY_REGISTRY
+        assert "beam" in STRATEGY_REGISTRY
+
+    def test_register_custom_strategy(self) -> None:
+        """register_strategy should add a new entry."""
+        name = "_test_custom_strat"
+
+        async def my_strat(candidates, goal, planner):
+            return candidates[-1]
+
+        try:
+            register_strategy(name, my_strat)
+            assert name in STRATEGY_REGISTRY
+        finally:
+            # Clean up so other tests aren't affected.
+            STRATEGY_REGISTRY.pop(name, None)
+
+    def test_register_duplicate_raises(self) -> None:
+        """Registering a strategy with an existing name should raise."""
+        async def dummy(candidates, goal, planner):
+            return candidates[0]
+
+        with pytest.raises(ValueError, match="already registered"):
+            register_strategy("mcts", dummy)

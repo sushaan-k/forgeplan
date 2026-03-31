@@ -11,6 +11,7 @@ import logging
 import math
 import random
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from dataclasses import field as dc_field
 from enum import StrEnum
@@ -293,6 +294,46 @@ class MCTSSearch:
             current = current.parent
 
 
+# ---------------------------------------------------------------------------
+# Strategy registry
+# ---------------------------------------------------------------------------
+# Maps strategy names to async callables with the signature:
+#   (candidates: list[list[PlanStep]], goal: Goal, planner: Planner)
+#       -> list[PlanStep]
+# Built-in strategies are registered at module load time (see bottom of file).
+
+STRATEGY_REGISTRY: dict[
+    str,
+    Callable[
+        [list[list[PlanStep]], Goal, Any],
+        Awaitable[list[PlanStep]],
+    ],
+] = {}
+
+
+def register_strategy(
+    name: str,
+    fn: Callable[
+        [list[list[PlanStep]], Goal, Any],
+        Awaitable[list[PlanStep]],
+    ],
+) -> None:
+    """Register a custom search strategy.
+
+    Args:
+        name: Strategy name (will be lower-cased).
+        fn: Async callable ``(candidates, goal, planner) -> selected_plan``.
+
+    Raises:
+        ValueError: If *name* is already registered.
+    """
+    key = name.lower()
+    if key in STRATEGY_REGISTRY:
+        raise ValueError(f"Strategy '{key}' is already registered")
+    STRATEGY_REGISTRY[key] = fn
+    logger.info("Registered custom search strategy: %s", key)
+
+
 class Planner:
     """High-level planning engine combining HTN decomposition and MCTS.
 
@@ -397,10 +438,9 @@ class Planner:
                     goal_description=goal.description,
                 )
 
-            if self._strategy == SearchStrategy.MCTS and len(candidates) > 1:
-                selected_plan = await self._mcts.search(goal, candidates)
-            elif self._strategy == SearchStrategy.BEAM and len(candidates) > 1:
-                selected_plan = await self._beam_select(candidates, goal)
+            if len(candidates) > 1 and self._strategy.value in STRATEGY_REGISTRY:
+                strategy_fn = STRATEGY_REGISTRY[self._strategy.value]
+                selected_plan = await strategy_fn(candidates, goal, self)
             else:
                 selected_plan = candidates[0]
 
@@ -734,3 +774,31 @@ class Agent:
             elif callable(tool):
                 wrapped.append(FunctionTool(fn=tool))
         return wrapped
+
+
+# ---------------------------------------------------------------------------
+# Built-in strategy registrations
+# ---------------------------------------------------------------------------
+
+
+async def _mcts_strategy(
+    candidates: list[list[PlanStep]],
+    goal: Goal,
+    planner: Any,
+) -> list[PlanStep]:
+    """Select the best plan using MCTS."""
+    return await planner._mcts.search(goal, candidates)
+
+
+async def _beam_strategy(
+    candidates: list[list[PlanStep]],
+    goal: Goal,
+    planner: Any,
+) -> list[PlanStep]:
+    """Select the best plan using beam search scoring."""
+    return await planner._beam_select(candidates, goal)
+
+
+# Populate the registry with built-in strategies.
+STRATEGY_REGISTRY[SearchStrategy.MCTS.value] = _mcts_strategy
+STRATEGY_REGISTRY[SearchStrategy.BEAM.value] = _beam_strategy
