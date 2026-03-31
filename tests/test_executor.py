@@ -239,3 +239,53 @@ class TestCostTracking:
         # MockModel returns usage={prompt_tokens:10, completion_tokens:20, total_tokens:30}
         assert result.total_tokens == 60
         assert result.total_cost_usd > 0.0
+
+
+class TestExecutionResultSerialization:
+    """Tests for JSON serialization / deserialization of ExecutionResult."""
+
+    def test_roundtrip_empty_result(self) -> None:
+        """An empty result should survive a JSON roundtrip."""
+        original = ExecutionResult()
+        json_str = original.to_json()
+        restored = ExecutionResult.from_json(json_str)
+        assert restored == original
+
+    @pytest.mark.asyncio
+    async def test_roundtrip_after_execution(self, executor: Executor) -> None:
+        """A result from actual execution should roundtrip cleanly."""
+        steps = [
+            PlanStep(
+                id="rt-1",
+                description="Roundtrip step",
+                expected_state_changes={"key": "value"},
+            ),
+        ]
+        original = await executor.execute_plan(steps=steps, invariants=[])
+        json_str = original.to_json()
+        restored = ExecutionResult.from_json(json_str)
+
+        assert restored.success == original.success
+        assert restored.steps_completed == original.steps_completed
+        assert restored.final_state == original.final_state
+        assert restored.total_tokens == original.total_tokens
+        assert restored.model_calls == original.model_calls
+        assert len(restored.verdicts) == len(original.verdicts)
+        assert len(restored.plan_trace) == len(original.plan_trace)
+
+    def test_roundtrip_with_cost_data(self) -> None:
+        """Cost tracking fields should survive serialization."""
+        original = ExecutionResult(
+            success=True,
+            steps_completed=5,
+            steps_total=5,
+            total_tokens=1500,
+            total_cost_usd=0.0225,
+            model_calls=5,
+            error="",
+        )
+        json_str = original.to_json()
+        restored = ExecutionResult.from_json(json_str)
+        assert restored.total_tokens == 1500
+        assert restored.total_cost_usd == pytest.approx(0.0225)
+        assert restored.model_calls == 5
