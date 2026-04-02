@@ -211,6 +211,16 @@ See the [`examples/`](examples/) directory:
 - **`coding_agent.py`** -- Multi-file code generation with test validation
 - **`web_agent.py`** -- Web navigation with checkpoint-based recovery
 
+## Demo
+
+Run the offline walkthrough with:
+
+```bash
+uv run python examples/demo.py
+```
+
+For longer-horizon coding, research, and web workflows, see `examples/`.
+
 ## Development
 
 ```bash
