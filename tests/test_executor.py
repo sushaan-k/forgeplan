@@ -11,6 +11,7 @@ from agent_forge.executor import (
     ExecutionResult,
     Executor,
     PlanStep,
+    StepResult,
     StepStatus,
 )
 from agent_forge.monitor import Monitor
@@ -159,3 +160,40 @@ class TestExecutor:
         child = PlanStep(description="Child")
         parent = PlanStep(description="Parent", subtasks=[child])
         assert Executor._count_steps([parent]) == 2
+
+
+class TestOnStepCompleteCallback:
+    """Tests for the on_step_complete progress callback."""
+
+    @pytest.mark.asyncio
+    async def test_callback_invoked_for_each_step(
+        self, executor: Executor
+    ) -> None:
+        """Callback should be called once per completed step."""
+        received: list[StepResult] = []
+
+        def on_step(sr: StepResult) -> None:
+            received.append(sr)
+
+        steps = [
+            PlanStep(id="a", description="Step A"),
+            PlanStep(id="b", description="Step B"),
+            PlanStep(id="c", description="Step C"),
+        ]
+        result = await executor.execute_plan(
+            steps=steps, invariants=[], on_step_complete=on_step
+        )
+        assert result.success is True
+        assert len(received) == 3
+        assert received[0].step_id == "a"
+        assert received[0].step_index == 1
+        assert received[2].step_index == 3
+        assert received[2].steps_total == 3
+        assert all(sr.status == StepStatus.COMPLETED for sr in received)
+
+    @pytest.mark.asyncio
+    async def test_callback_not_required(self, executor: Executor) -> None:
+        """Execution should work fine without a callback."""
+        steps = [PlanStep(description="No callback step")]
+        result = await executor.execute_plan(steps=steps, invariants=[])
+        assert result.success is True
