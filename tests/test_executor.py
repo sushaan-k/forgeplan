@@ -16,6 +16,7 @@ from agent_forge.executor import (
 )
 from agent_forge.monitor import Monitor
 from agent_forge.tools.function import FunctionTool
+from tests.conftest import MockModel
 
 if TYPE_CHECKING:
     from agent_forge.state import StateManager
@@ -197,3 +198,44 @@ class TestOnStepCompleteCallback:
         steps = [PlanStep(description="No callback step")]
         result = await executor.execute_plan(steps=steps, invariants=[])
         assert result.success is True
+
+
+class TestCostTracking:
+    """Tests for execution cost tracking fields."""
+
+    @pytest.mark.asyncio
+    async def test_cost_fields_default_to_zero(
+        self, executor: Executor
+    ) -> None:
+        """Without an LLM, cost fields should be zero."""
+        steps = [PlanStep(description="No model step")]
+        result = await executor.execute_plan(steps=steps, invariants=[])
+        assert result.total_tokens == 0
+        assert result.total_cost_usd == 0.0
+        assert result.model_calls == 0
+
+    @pytest.mark.asyncio
+    async def test_cost_fields_populated_with_model(
+        self, state_manager: StateManager
+    ) -> None:
+        """When an LLM is used, cost fields should reflect usage."""
+        model = MockModel(responses=["result one", "result two"])
+        monitor = Monitor(state_manager=state_manager)
+        backtrack = BacktrackEngine(state_manager=state_manager)
+        executor = Executor(
+            state_manager=state_manager,
+            monitor=monitor,
+            backtrack_engine=backtrack,
+            model=model,
+        )
+
+        steps = [
+            PlanStep(description="First LLM step"),
+            PlanStep(description="Second LLM step"),
+        ]
+        result = await executor.execute_plan(steps=steps, invariants=[])
+        assert result.success is True
+        assert result.model_calls == 2
+        # MockModel returns usage={prompt_tokens:10, completion_tokens:20, total_tokens:30}
+        assert result.total_tokens == 60
+        assert result.total_cost_usd > 0.0
