@@ -99,6 +99,29 @@ class ExecutionResult(BaseModel):
     total_cost_usd: float = 0.0
     model_calls: int = 0
 
+    def to_json(self) -> str:
+        """Serialize the execution result to a JSON string.
+
+        Useful for checkpointing long-running plans to disk so they
+        can be resumed or inspected later.
+
+        Returns:
+            JSON string representation of this result.
+        """
+        return self.model_dump_json(indent=2)
+
+    @classmethod
+    def from_json(cls, data: str) -> ExecutionResult:
+        """Deserialize an execution result from a JSON string.
+
+        Args:
+            data: JSON string previously produced by :meth:`to_json`.
+
+        Returns:
+            Reconstructed ExecutionResult.
+        """
+        return cls.model_validate_json(data)
+
 
 class StepResult(BaseModel):
     """Progress information emitted after each step completes.
