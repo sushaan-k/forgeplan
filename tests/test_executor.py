@@ -240,6 +240,64 @@ class TestCostTracking:
         assert result.total_tokens == 60
         assert result.total_cost_usd > 0.0
 
+    @pytest.mark.asyncio
+    async def test_cost_fields_reset_between_runs(
+        self, state_manager: StateManager
+    ) -> None:
+        """Repeated executions on one executor should not accumulate totals."""
+        model = MockModel(responses=["run one", "run two"])
+        monitor = Monitor(state_manager=state_manager)
+        backtrack = BacktrackEngine(state_manager=state_manager)
+        executor = Executor(
+            state_manager=state_manager,
+            monitor=monitor,
+            backtrack_engine=backtrack,
+            model=model,
+        )
+
+        first = await executor.execute_plan(
+            steps=[PlanStep(description="First LLM step")],
+            invariants=[],
+        )
+        second = await executor.execute_plan(
+            steps=[PlanStep(description="Second LLM step")],
+            invariants=[],
+        )
+
+        assert first.model_calls == 1
+        assert first.total_tokens == 30
+        assert second.model_calls == 1
+        assert second.total_tokens == 30
+
+    @pytest.mark.asyncio
+    async def test_checkpoint_counter_resets_between_runs(
+        self, state_manager: StateManager
+    ) -> None:
+        """Checkpoint cadence should not carry over between executions."""
+        monitor = Monitor(state_manager=state_manager)
+        backtrack = BacktrackEngine(state_manager=state_manager)
+        executor = Executor(
+            state_manager=state_manager,
+            monitor=monitor,
+            backtrack_engine=backtrack,
+            checkpoint_interval=2,
+        )
+
+        await executor.execute_plan(
+            steps=[PlanStep(description="run one step")],
+            invariants=[],
+        )
+        checkpoints_after_first = len(state_manager.checkpoints)
+
+        await executor.execute_plan(
+            steps=[PlanStep(description="run two step")],
+            invariants=[],
+        )
+
+        # Each one-step execution should add only its own plan_start checkpoint.
+        assert checkpoints_after_first == 1
+        assert len(state_manager.checkpoints) == 2
+
 
 class TestExecutionResultSerialization:
     """Tests for JSON serialization / deserialization of ExecutionResult."""
