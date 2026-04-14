@@ -167,9 +167,7 @@ class TestOnStepCompleteCallback:
     """Tests for the on_step_complete progress callback."""
 
     @pytest.mark.asyncio
-    async def test_callback_invoked_for_each_step(
-        self, executor: Executor
-    ) -> None:
+    async def test_callback_invoked_for_each_step(self, executor: Executor) -> None:
         """Callback should be called once per completed step."""
         received: list[StepResult] = []
 
@@ -204,9 +202,7 @@ class TestCostTracking:
     """Tests for execution cost tracking fields."""
 
     @pytest.mark.asyncio
-    async def test_cost_fields_default_to_zero(
-        self, executor: Executor
-    ) -> None:
+    async def test_cost_fields_default_to_zero(self, executor: Executor) -> None:
         """Without an LLM, cost fields should be zero."""
         steps = [PlanStep(description="No model step")]
         result = await executor.execute_plan(steps=steps, invariants=[])

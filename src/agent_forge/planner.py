@@ -370,7 +370,9 @@ class Planner:
         self._max_backtrack_depth = max_backtrack_depth
         self._checkpoint_interval = checkpoint_interval
         self._cache_size = cache_size
-        self._decomposition_cache: OrderedDict[str, list[list[PlanStep]]] = OrderedDict()
+        self._decomposition_cache: OrderedDict[str, list[list[PlanStep]]] = (
+            OrderedDict()
+        )
 
         self._state_manager = StateManager()
         self._monitor = Monitor(

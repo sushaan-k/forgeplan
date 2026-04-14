@@ -247,6 +247,7 @@ class TestStrategyRegistry:
 
     def test_register_duplicate_raises(self) -> None:
         """Registering a strategy with an existing name should raise."""
+
         async def dummy(candidates, goal, planner):
             return candidates[0]
 
