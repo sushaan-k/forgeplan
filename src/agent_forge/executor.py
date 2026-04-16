@@ -9,9 +9,8 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import Callable
 from enum import StrEnum
-from typing import Any, TypedDict
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -80,9 +79,6 @@ class ExecutionResult(BaseModel):
         plan_trace: Complete list of steps in the executed plan.
         backtrack_log: Record of all backtracking events.
         recoverable: Whether the planner should attempt replanning.
-        total_tokens: Aggregate token count across all LLM calls.
-        total_cost_usd: Estimated total cost in USD.
-        model_calls: Number of LLM API calls made during execution.
     """
 
     success: bool = False
@@ -95,67 +91,6 @@ class ExecutionResult(BaseModel):
     plan_trace: list[PlanStep] = Field(default_factory=list)
     backtrack_log: list[dict[str, Any]] = Field(default_factory=list)
     recoverable: bool = True
-    total_tokens: int = 0
-    total_cost_usd: float = 0.0
-    model_calls: int = 0
-
-    def to_json(self) -> str:
-        """Serialize the execution result to a JSON string.
-
-        Useful for checkpointing long-running plans to disk so they
-        can be resumed or inspected later.
-
-        Returns:
-            JSON string representation of this result.
-        """
-        return self.model_dump_json(indent=2)
-
-    @classmethod
-    def from_json(cls, data: str) -> ExecutionResult:
-        """Deserialize an execution result from a JSON string.
-
-        Args:
-            data: JSON string previously produced by :meth:`to_json`.
-
-        Returns:
-            Reconstructed ExecutionResult.
-        """
-        return cls.model_validate_json(data)
-
-
-class StepResult(BaseModel):
-    """Progress information emitted after each step completes.
-
-    Passed to the ``on_step_complete`` callback so callers can build
-    progress bars, structured logging, or streaming UIs.
-
-    Attributes:
-        step_id: Unique identifier of the completed step.
-        step_description: Human-readable description of the step.
-        step_index: 1-based index of the step within the plan.
-        steps_total: Total number of steps in the plan.
-        status: Resulting status of the step.
-        result: The step's output value (may be ``None``).
-    """
-
-    step_id: str
-    step_description: str
-    step_index: int
-    steps_total: int
-    status: StepStatus
-    result: Any = None
-
-
-# Type alias for the step-complete callback.
-OnStepComplete = Callable[[StepResult], None]
-
-
-class CostFields(TypedDict):
-    """Typed view of cost-tracking fields attached to execution results."""
-
-    total_tokens: int
-    total_cost_usd: float
-    model_calls: int
 
 
 class Executor:
@@ -192,9 +127,6 @@ class Executor:
         self._checkpoint_interval = checkpoint_interval
         self._system_prompt = system_prompt
         self._steps_since_checkpoint = 0
-        self._total_tokens: int = 0
-        self._total_cost_usd: float = 0.0
-        self._model_calls: int = 0
         logger.debug(
             "Executor initialized (%d tools, checkpoint_interval=%d)",
             len(self._tools),
@@ -206,7 +138,6 @@ class Executor:
         steps: list[PlanStep],
         invariants: list[str],
         max_steps: int | None = None,
-        on_step_complete: OnStepComplete | None = None,
     ) -> ExecutionResult:
         """Execute a list of plan steps in order.
 
@@ -216,14 +147,10 @@ class Executor:
         Args:
             steps: Ordered list of plan steps to execute.
             invariants: Global invariant conditions to enforce.
-            max_steps: Optional cap on completed steps.
-            on_step_complete: Optional callback invoked after each step
-                finishes with a :class:`StepResult` describing what happened.
 
         Returns:
             ExecutionResult with success status and details.
         """
-        self._reset_execution_counters()
         total_steps = self._count_steps(steps)
         completed = 0
         verdicts: list[MonitorVerdict] = []
@@ -250,7 +177,6 @@ class Executor:
                         f"{completed} completed steps"
                     ),
                     recoverable=False,
-                    **self._cost_fields(),
                 )
 
             next_index: int | None = None
@@ -293,7 +219,6 @@ class Executor:
                         f"{reason}"
                     ),
                     recoverable=False,
-                    **self._cost_fields(),
                 )
 
             step = pending_steps.pop(next_index)
@@ -310,18 +235,6 @@ class Executor:
                 self._state_manager.advance_step()
                 completed += 1
                 completed_ids.add(step.id)
-
-                if on_step_complete is not None:
-                    on_step_complete(
-                        StepResult(
-                            step_id=step.id,
-                            step_description=step.description,
-                            step_index=completed,
-                            steps_total=total_steps,
-                            status=step.status,
-                            result=step.result,
-                        )
-                    )
 
                 self._steps_since_checkpoint += 1
                 if self._steps_since_checkpoint >= self._checkpoint_interval:
@@ -356,7 +269,6 @@ class Executor:
                             final_state=self._state_manager.current_state,
                             error=f"Backtracked at step '{step.id}': {verdict.explanation}",
                             recoverable=True,
-                            **self._cost_fields(),
                         )
                     else:
                         return ExecutionResult(
@@ -367,7 +279,6 @@ class Executor:
                             final_state=self._state_manager.current_state,
                             error=f"Cannot backtrack further at step '{step.id}'",
                             recoverable=False,
-                            **self._cost_fields(),
                         )
                 else:
                     self._backtrack.reset_depth()
@@ -383,7 +294,6 @@ class Executor:
                     final_state=self._state_manager.current_state,
                     error=str(exc),
                     recoverable=exc.recoverable,
-                    **self._cost_fields(),
                 )
 
         logger.info(
@@ -397,7 +307,6 @@ class Executor:
             steps_total=total_steps,
             verdicts=verdicts,
             final_state=self._state_manager.current_state,
-            **self._cost_fields(),
         )
 
     async def _execute_step(self, step: PlanStep) -> Any:
@@ -431,23 +340,12 @@ class Executor:
 
         if self._model is not None:
             prompt = self._build_step_prompt(step)
-            messages: list[dict[str, str]] = []
-            if self._system_prompt:
-                messages.append({"role": "system", "content": self._system_prompt})
-            messages.append({"role": "user", "content": prompt})
-            model_response = await self._model.generate(
-                messages,
+            response = await self._model.generate_text(
+                prompt,
+                system=self._system_prompt or None,
                 tools=self._tool_schemas(),
             )
-            self._model_calls += 1
-            usage = model_response.usage
-            step_tokens = usage.get("total_tokens", 0)
-            self._total_tokens += step_tokens
-            self._total_cost_usd += self._estimate_cost(
-                usage.get("prompt_tokens", 0),
-                usage.get("completion_tokens", 0),
-            )
-            return model_response.content
+            return response
 
         return f"Completed: {step.description}"
 
@@ -469,33 +367,6 @@ class Executor:
             f"Current state: {state_summary}\n\n"
             f"Provide the result of executing this step."
         )
-
-    @staticmethod
-    def _estimate_cost(prompt_tokens: int, completion_tokens: int) -> float:
-        """Estimate USD cost from token counts.
-
-        Uses a rough average across popular models (~$5/1M input,
-        ~$15/1M output).  The estimate is intentionally conservative;
-        callers needing exact billing should use their provider's API.
-        """
-        input_cost = prompt_tokens * 5.0 / 1_000_000
-        output_cost = completion_tokens * 15.0 / 1_000_000
-        return round(input_cost + output_cost, 8)
-
-    def _cost_fields(self) -> CostFields:
-        """Return cost-tracking fields for inclusion in ExecutionResult."""
-        return {
-            "total_tokens": self._total_tokens,
-            "total_cost_usd": self._total_cost_usd,
-            "model_calls": self._model_calls,
-        }
-
-    def _reset_execution_counters(self) -> None:
-        """Reset per-execution counters before a new plan run."""
-        self._total_tokens = 0
-        self._total_cost_usd = 0.0
-        self._model_calls = 0
-        self._steps_since_checkpoint = 0
 
     def _tool_schemas(self) -> list[dict[str, Any]]:
         """Return OpenAI-compatible schemas for all registered tools."""
