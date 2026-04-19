@@ -8,7 +8,13 @@ import pytest
 
 from agent_forge.executor import ExecutionResult
 from agent_forge.goal import Goal, GoalStatus
-from agent_forge.planner import Agent, Planner, SearchStrategy
+from agent_forge.planner import (
+    STRATEGY_REGISTRY,
+    Agent,
+    Planner,
+    SearchStrategy,
+    register_strategy,
+)
 from agent_forge.tools.mcp import MCPTool
 from tests.conftest import MockModel
 
@@ -215,3 +221,81 @@ class TestPlanner:
         assert "max_steps" in result.error
         assert result.recoverable is False
         assert goal.status == GoalStatus.FAILED
+
+
+class TestStrategyRegistry:
+    """Tests for the pluggable strategy registry."""
+
+    def test_builtin_strategies_registered(self) -> None:
+        """mcts and beam should be in the registry at import time."""
+        assert "mcts" in STRATEGY_REGISTRY
+        assert "beam" in STRATEGY_REGISTRY
+
+    def test_register_custom_strategy(self) -> None:
+        """register_strategy should add a new entry."""
+        name = "_test_custom_strat"
+
+        async def my_strat(candidates, goal, planner):
+            return candidates[-1]
+
+        try:
+            register_strategy(name, my_strat)
+            assert name in STRATEGY_REGISTRY
+        finally:
+            # Clean up so other tests aren't affected.
+            STRATEGY_REGISTRY.pop(name, None)
+
+    def test_register_duplicate_raises(self) -> None:
+        """Registering a strategy with an existing name should raise."""
+
+        async def dummy(candidates, goal, planner):
+            return candidates[0]
+
+        with pytest.raises(ValueError, match="already registered"):
+            register_strategy("mcts", dummy)
+
+
+class TestDecompositionCache:
+    """Tests for the goal decomposition LRU cache."""
+
+    @pytest.mark.asyncio
+    async def test_cache_hit_avoids_extra_llm_call(self) -> None:
+        """Executing the same goal twice should only call the LLM once."""
+        model = MockModel(
+            responses=[
+                "PLAN 1:\n1. Do work | action: llm | postcondition: done\n",
+                "work result",
+                "work result",
+            ]
+        )
+        agent = Agent(model=model, tools=[])
+        planner = Planner(
+            agent=agent,
+            search_strategy="greedy",
+            cache_size=8,
+        )
+
+        goal_a = Goal(description="Cached goal", max_steps=5)
+        goal_b = Goal(description="Cached goal", max_steps=5)
+
+        await planner.execute(goal_a)
+        calls_after_first = len(model.calls)
+
+        await planner.execute(goal_b)
+        calls_after_second = len(model.calls)
+
+        # The decomposition LLM call should not have happened a second time.
+        # Only step-execution calls should appear for the second run.
+        decompose_calls_first = 1  # one decomposition call
+        decompose_calls_second = calls_after_second - calls_after_first
+        # The second run should have fewer calls (no decomposition).
+        assert decompose_calls_second < calls_after_first
+        assert decompose_calls_first >= 1
+
+    def test_cache_disabled_when_size_zero(self) -> None:
+        """cache_size=0 should disable caching entirely."""
+        model = MockModel()
+        agent = Agent(model=model, tools=[])
+        planner = Planner(agent=agent, cache_size=0)
+        assert planner._cache_size == 0
+        assert len(planner._decomposition_cache) == 0

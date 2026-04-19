@@ -11,10 +11,12 @@ import logging
 import math
 import random
 import uuid
+from collections import OrderedDict
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from dataclasses import field as dc_field
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 
@@ -293,6 +295,46 @@ class MCTSSearch:
             current = current.parent
 
 
+# ---------------------------------------------------------------------------
+# Strategy registry
+# ---------------------------------------------------------------------------
+# Maps strategy names to async callables with the signature:
+#   (candidates: list[list[PlanStep]], goal: Goal, planner: Planner)
+#       -> list[PlanStep]
+# Built-in strategies are registered at module load time (see bottom of file).
+
+STRATEGY_REGISTRY: dict[
+    str,
+    Callable[
+        [list[list[PlanStep]], Goal, Any],
+        Awaitable[list[PlanStep]],
+    ],
+] = {}
+
+
+def register_strategy(
+    name: str,
+    fn: Callable[
+        [list[list[PlanStep]], Goal, Any],
+        Awaitable[list[PlanStep]],
+    ],
+) -> None:
+    """Register a custom search strategy.
+
+    Args:
+        name: Strategy name (will be lower-cased).
+        fn: Async callable ``(candidates, goal, planner) -> selected_plan``.
+
+    Raises:
+        ValueError: If *name* is already registered.
+    """
+    key = name.lower()
+    if key in STRATEGY_REGISTRY:
+        raise ValueError(f"Strategy '{key}' is already registered")
+    STRATEGY_REGISTRY[key] = fn
+    logger.info("Registered custom search strategy: %s", key)
+
+
 class Planner:
     """High-level planning engine combining HTN decomposition and MCTS.
 
@@ -309,6 +351,8 @@ class Planner:
         checkpoint_interval: Steps between checkpoints.
         rollout_model: Cheaper LLM for MCTS rollouts.
         num_simulations: MCTS simulation count.
+        cache_size: Maximum number of goal decompositions to cache.
+            Set to 0 to disable caching.
     """
 
     def __init__(
@@ -319,11 +363,16 @@ class Planner:
         checkpoint_interval: int = 3,
         rollout_model: LLMBaseModel | None = None,
         num_simulations: int = 50,
+        cache_size: int = 64,
     ) -> None:
         self._agent = agent
         self._strategy = SearchStrategy(search_strategy)
         self._max_backtrack_depth = max_backtrack_depth
         self._checkpoint_interval = checkpoint_interval
+        self._cache_size = cache_size
+        self._decomposition_cache: OrderedDict[str, list[list[PlanStep]]] = (
+            OrderedDict()
+        )
 
         self._state_manager = StateManager()
         self._monitor = Monitor(
@@ -397,10 +446,9 @@ class Planner:
                     goal_description=goal.description,
                 )
 
-            if self._strategy == SearchStrategy.MCTS and len(candidates) > 1:
-                selected_plan = await self._mcts.search(goal, candidates)
-            elif self._strategy == SearchStrategy.BEAM and len(candidates) > 1:
-                selected_plan = await self._beam_select(candidates, goal)
+            if len(candidates) > 1 and self._strategy.value in STRATEGY_REGISTRY:
+                strategy_fn = STRATEGY_REGISTRY[self._strategy.value]
+                selected_plan = await strategy_fn(candidates, goal, self)
             else:
                 selected_plan = candidates[0]
 
@@ -457,8 +505,8 @@ class Planner:
     async def _decompose_goal(self, goal: Goal) -> list[list[PlanStep]]:
         """Decompose a goal into candidate plans using HTN.
 
-        Uses the LLM to propose task decompositions and generates
-        multiple candidate plans for MCTS evaluation.
+        Results are cached by goal description so that identical goals
+        reuse prior decompositions without an extra LLM call.
 
         Args:
             goal: The goal to decompose.
@@ -466,19 +514,29 @@ class Planner:
         Returns:
             List of candidate plans (each plan is a list of PlanStep).
         """
+        cache_key = goal.description
+        if self._cache_size > 0 and cache_key in self._decomposition_cache:
+            self._decomposition_cache.move_to_end(cache_key)
+            logger.debug("Decomposition cache hit for: %s", cache_key[:60])
+            return self._decomposition_cache[cache_key]
+
         if self._agent.model is None:
-            return [self._generate_default_plan(goal)]
-
-        prompt = self._build_decomposition_prompt(goal)
-        response = await self._agent.model.generate_text(
-            prompt,
-            system=self._agent.system_prompt or None,
-            tools=self._agent.tool_schemas,
-        )
-        plans = self._parse_decomposition(response, goal)
-
-        if not plans:
             plans = [self._generate_default_plan(goal)]
+        else:
+            prompt = self._build_decomposition_prompt(goal)
+            response = await self._agent.model.generate_text(
+                prompt,
+                system=self._agent.system_prompt or None,
+                tools=self._agent.tool_schemas,
+            )
+            plans = self._parse_decomposition(response, goal)
+            if not plans:
+                plans = [self._generate_default_plan(goal)]
+
+        if self._cache_size > 0:
+            self._decomposition_cache[cache_key] = plans
+            while len(self._decomposition_cache) > self._cache_size:
+                self._decomposition_cache.popitem(last=False)
 
         logger.info("Generated %d candidate plans", len(plans))
         return plans
@@ -734,3 +792,31 @@ class Agent:
             elif callable(tool):
                 wrapped.append(FunctionTool(fn=tool))
         return wrapped
+
+
+# ---------------------------------------------------------------------------
+# Built-in strategy registrations
+# ---------------------------------------------------------------------------
+
+
+async def _mcts_strategy(
+    candidates: list[list[PlanStep]],
+    goal: Goal,
+    planner: Any,
+) -> list[PlanStep]:
+    """Select the best plan using MCTS."""
+    return cast(list[PlanStep], await planner._mcts.search(goal, candidates))
+
+
+async def _beam_strategy(
+    candidates: list[list[PlanStep]],
+    goal: Goal,
+    planner: Any,
+) -> list[PlanStep]:
+    """Select the best plan using beam search scoring."""
+    return cast(list[PlanStep], await planner._beam_select(candidates, goal))
+
+
+# Populate the registry with built-in strategies.
+STRATEGY_REGISTRY[SearchStrategy.MCTS.value] = _mcts_strategy
+STRATEGY_REGISTRY[SearchStrategy.BEAM.value] = _beam_strategy

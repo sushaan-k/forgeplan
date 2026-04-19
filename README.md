@@ -1,15 +1,12 @@
-# forgeplan
+# agent-forge
 
-[![CI](https://github.com/sushaan-k/forgeplan/actions/workflows/ci.yml/badge.svg)](https://github.com/sushaan-k/forgeplan/actions)
-[![PyPI](https://img.shields.io/pypi/v/forgeplan.svg)](https://pypi.org/project/forgeplan/)
-[![PyPI Downloads](https://img.shields.io/pypi/dm/forgeplan.svg)](https://pypi.org/project/forgeplan/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![CI](https://github.com/sushaan-k/agent-forge/actions/workflows/ci.yml/badge.svg)](https://github.com/sushaan-k/agent-forge/actions)
 
 **A long-horizon planning engine for LLM agents.**
 
-`forgeplan` separates planning from generation. Instead of asking the model to
+`agent-forge` separates planning from generation. Instead of asking the model to
 improvise an entire multi-step workflow in one shot, it decomposes goals,
 scores candidate plans, executes with checkpoints, and replans when reality
 diverges from the original plan.
@@ -26,33 +23,23 @@ diverges from the original plan.
 
 ## The Problem
 
-Current LLM agents are fundamentally broken at planning. Research ([arXiv:2601.22311](https://arxiv.org/abs/2601.22311)) proves that **reasoning does not equal planning** — models with strong chain-of-thought reasoning fail catastrophically on long-horizon tasks due to "early myopic commitment." If an agent is 85% accurate per step, a 10-step workflow succeeds only ~20% of the time.
+Current LLM agents are fundamentally broken at planning. Research ([arXiv:2601.22311](https://arxiv.org/abs/2601.22311)) proves that **reasoning does not equal planning** -- models with strong chain-of-thought reasoning fail catastrophically on long-horizon tasks due to "early myopic commitment." If an agent is 85% accurate per step, a 10-step workflow succeeds only ~20% of the time.
 
 Every major agent framework (LangGraph, CrewAI, Anthropic's Agent SDK) delegates planning to the LLM itself. Nobody has built a dedicated planning layer.
 
 ## The Solution
 
-`forgeplan` is a standalone planning engine that wraps any LLM agent and provides:
+`agent-forge` is a standalone planning engine that wraps any LLM agent and provides:
 
-- **HTN decomposition** — breaks high-level goals into validated subtask trees
-- **MCTS plan selection** — evaluates candidate plans via Monte Carlo Tree Search
-- **Execution monitoring** — checks postconditions, invariants, and state drift after every step
-- **Backtracking with causal reasoning** — rewinds to the right checkpoint and invalidates only the affected downstream steps
-
-## Benchmark
-
-| Strategy | 5-step success | 10-step success | 20-step success |
-|---|---|---|---|
-| Raw LLM (GPT-4o) | 72% | 43% | 19% |
-| LangGraph ReAct | 75% | 47% | 22% |
-| **forgeplan (mcts)** | **91%** | **79%** | **61%** |
-
-*Internal benchmarks on PlanBench-v2, 500 rollouts per condition. Reproduce with `python examples/bench.py`.*
+- **HTN decomposition** -- breaks high-level goals into validated subtask trees
+- **MCTS plan selection** -- evaluates candidate plans via Monte Carlo Tree Search
+- **Execution monitoring** -- checks postconditions, invariants, and state drift after every step
+- **Backtracking with causal reasoning** -- rewinds to the right checkpoint and invalidates only the affected downstream steps
 
 ## Quick Start
 
 ```bash
-pip install forgeplan
+pip install agent-forge
 ```
 
 Minimal example:
@@ -74,14 +61,14 @@ result = asyncio.run(planner.execute(goal))
 print(result.success, result.steps_completed)
 ```
 
-When you already have an agent stack, `forgeplan` is intended to sit above it
+When you already have an agent stack, `agent-forge` is intended to sit above it
 as the planning and monitoring layer rather than replace your tool runtime.
 
 ## Architecture
 
 ```mermaid
 graph TB
-    subgraph forgeplan
+    subgraph agent-forge
         P[Planner<br/>HTN decomp + MCTS] --> E[Executor<br/>Step runner + Tool calls]
         E --> M[Monitor<br/>Invariants + Drift]
         M -->|Replan Loop| P
@@ -202,7 +189,7 @@ agent = Agent(model=MyLocalModel(model_name="local-7b"))
 
 ## Where It Fits
 
-`forgeplan` is a good fit when:
+`agent-forge` is a good fit when:
 
 - the task is long enough that early mistakes cascade
 - you need explicit success criteria and invariants
@@ -214,15 +201,15 @@ agent = Agent(model=MyLocalModel(model_name="local-7b"))
 - **Model-agnostic**: Works with any LLM via standard API. The planner constrains and guides the LLM; it does not replace it.
 - **MCP-native**: Tool calls go through MCP, so any MCP server is automatically available.
 - **Separation of concerns**: LLM handles creativity/reasoning. Planner handles structure/validation. Monitor handles safety/correctness.
-- **Lightweight**: Not a framework — a library. `pip install forgeplan`, wrap your existing agent, done.
+- **Lightweight**: Not a framework -- a library. `pip install agent-forge`, wrap your existing agent, done.
 
 ## Examples
 
-See the [`examples/`](https://github.com/sushaan-k/forgeplan/tree/main/examples) directory:
+See the [`examples/`](examples/) directory:
 
-- **`research_agent.py`** — Research and write a report with source verification
-- **`coding_agent.py`** — Multi-file code generation with test validation
-- **`web_agent.py`** — Web navigation with checkpoint-based recovery
+- **`research_agent.py`** -- Research and write a report with source verification
+- **`coding_agent.py`** -- Multi-file code generation with test validation
+- **`web_agent.py`** -- Web navigation with checkpoint-based recovery
 
 ## Demo
 
@@ -237,8 +224,8 @@ For longer-horizon coding, research, and web workflows, see `examples/`.
 ## Development
 
 ```bash
-git clone https://github.com/sushaan-k/forgeplan.git
-cd forgeplan
+git clone https://github.com/sushaan-k/agent-forge.git
+cd agent-forge
 pip install -e ".[dev]"
 
 # Run tests

@@ -27,10 +27,23 @@ from agent_forge.exceptions import (
     StateError,
     ToolError,
 )
-from agent_forge.executor import ExecutionResult, Executor, PlanStep
+from agent_forge.executor import (
+    ExecutionEvent,
+    ExecutionResult,
+    Executor,
+    PlanStep,
+    StepResult,
+)
 from agent_forge.goal import Goal, GoalStatus
 from agent_forge.monitor import CheckResult, Monitor, MonitorVerdict
-from agent_forge.planner import Agent, MCTSSearch, Planner, SearchStrategy
+from agent_forge.planner import (
+    STRATEGY_REGISTRY,
+    Agent,
+    MCTSSearch,
+    Planner,
+    SearchStrategy,
+    register_strategy,
+)
 from agent_forge.state import Checkpoint, StateManager
 from agent_forge.tools.function import FunctionTool
 from agent_forge.tools.mcp import MCPTool
@@ -38,38 +51,34 @@ from agent_forge.tools.mcp import MCPTool
 __version__ = "0.1.0"
 
 __all__ = [
+    "STRATEGY_REGISTRY",
     "Agent",
-    # Exceptions
     "AgentForgeError",
-    # Backtracking
     "BacktrackEngine",
     "BacktrackError",
     "BacktrackEvent",
     "CheckResult",
     "Checkpoint",
     "ExecutionError",
+    "ExecutionEvent",
     "ExecutionResult",
-    # Execution
     "Executor",
-    # Tools
     "FunctionTool",
     "Goal",
     "GoalStatus",
     "InvariantViolation",
     "MCPTool",
-    # Search
     "MCTSSearch",
     "ModelError",
-    # Monitoring
     "Monitor",
     "MonitorVerdict",
     "PlanStep",
-    # Core
     "Planner",
     "PlanningError",
     "SearchStrategy",
     "StateError",
-    # State
     "StateManager",
+    "StepResult",
     "ToolError",
+    "register_strategy",
 ]
