@@ -202,6 +202,7 @@ class Executor:
         model: LLM for generating step actions.
         tools: Available tools keyed by name.
         checkpoint_interval: Create a checkpoint every N steps.
+        step_timeout_seconds: Optional per-step timeout for tool and model calls.
     """
 
     def __init__(
@@ -213,7 +214,11 @@ class Executor:
         tools: dict[str, Any] | None = None,
         checkpoint_interval: int = 3,
         system_prompt: str = "",
+        step_timeout_seconds: float | None = None,
     ) -> None:
+        if step_timeout_seconds is not None and step_timeout_seconds <= 0:
+            raise ValueError("step_timeout_seconds must be positive")
+
         self._state_manager = state_manager
         self._monitor = monitor
         self._backtrack = backtrack_engine
@@ -221,14 +226,16 @@ class Executor:
         self._tools = tools or {}
         self._checkpoint_interval = checkpoint_interval
         self._system_prompt = system_prompt
+        self._step_timeout_seconds = step_timeout_seconds
         self._steps_since_checkpoint = 0
         self._total_tokens: int = 0
         self._total_cost_usd: float = 0.0
         self._model_calls: int = 0
         logger.debug(
-            "Executor initialized (%d tools, checkpoint_interval=%d)",
+            "Executor initialized (%d tools, checkpoint_interval=%d, step_timeout=%s)",
             len(self._tools),
             checkpoint_interval,
+            step_timeout_seconds,
         )
 
     async def execute_plan(
@@ -512,6 +519,23 @@ class Executor:
         step.status = StepStatus.RUNNING
         logger.info("Executing step '%s': %s", step.id, step.description[:80])
 
+        try:
+            if self._step_timeout_seconds is None:
+                return await self._execute_step_action(step)
+            return await asyncio.wait_for(
+                self._execute_step_action(step),
+                timeout=self._step_timeout_seconds,
+            )
+        except TimeoutError as exc:
+            timeout = self._format_timeout(self._step_timeout_seconds)
+            raise ExecutionError(
+                message=f"Step '{step.id}' timed out after {timeout}",
+                step_id=step.id,
+                recoverable=True,
+            ) from exc
+
+    async def _execute_step_action(self, step: PlanStep) -> Any:
+        """Run a step action once timeout handling has been applied."""
         if step.action in self._tools:
             tool = self._tools[step.action]
             try:
@@ -544,6 +568,13 @@ class Executor:
             return model_response.content
 
         return f"Completed: {step.description}"
+
+    @staticmethod
+    def _format_timeout(timeout_seconds: float | None) -> str:
+        """Format a timeout value for stable, human-readable errors."""
+        if timeout_seconds is None:
+            return "the configured timeout"
+        return f"{timeout_seconds:g}s"
 
     def _build_step_prompt(self, step: PlanStep) -> str:
         """Build an LLM prompt for executing a step.

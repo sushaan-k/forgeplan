@@ -158,6 +158,13 @@ class TestPlanner:
             planner = Planner(agent=agent, search_strategy=strategy)
             assert planner._strategy == SearchStrategy(strategy)
 
+    def test_planner_configures_step_timeout(self) -> None:
+        """Planner should pass step timeout configuration to its executor."""
+        agent = Agent(model=MockModel())
+        planner = Planner(agent=agent, step_timeout_seconds=2.5)
+
+        assert planner._executor._step_timeout_seconds == 2.5
+
     def test_parse_decomposition(self) -> None:
         """Should parse LLM plan decomposition responses."""
         model = MockModel()

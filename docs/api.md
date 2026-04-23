@@ -67,6 +67,7 @@ Main entry point. Decomposes goals, selects plans, and executes with monitoring.
 | `checkpoint_interval` | `int` | `3` | Steps between checkpoints |
 | `rollout_model` | `BaseModel \| None` | `None` | Cheaper model for MCTS rollouts |
 | `num_simulations` | `int` | `50` | MCTS simulation count |
+| `step_timeout_seconds` | `float \| None` | `None` | Optional timeout applied to each tool or model step |
 
 **Methods:**
 

@@ -353,6 +353,7 @@ class Planner:
         num_simulations: MCTS simulation count.
         cache_size: Maximum number of goal decompositions to cache.
             Set to 0 to disable caching.
+        step_timeout_seconds: Optional per-step timeout for tool and model calls.
     """
 
     def __init__(
@@ -364,6 +365,7 @@ class Planner:
         rollout_model: LLMBaseModel | None = None,
         num_simulations: int = 50,
         cache_size: int = 64,
+        step_timeout_seconds: float | None = None,
     ) -> None:
         self._agent = agent
         self._strategy = SearchStrategy(search_strategy)
@@ -397,6 +399,7 @@ class Planner:
             tools={t.name: t for t in agent.tools if hasattr(t, "name")},
             checkpoint_interval=checkpoint_interval,
             system_prompt=agent.system_prompt,
+            step_timeout_seconds=step_timeout_seconds,
         )
         logger.info(
             "Planner initialized (strategy=%s, max_backtrack=%d)",

@@ -148,6 +148,7 @@ planner = Planner(
     search_strategy="mcts",     # "greedy", "mcts", or "beam"
     max_backtrack_depth=5,
     checkpoint_interval=3,
+    step_timeout_seconds=60,     # optional per-step tool/model timeout
     rollout_model=None,          # cheaper model for MCTS rollouts
     num_simulations=50,
 )

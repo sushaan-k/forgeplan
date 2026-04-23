@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -15,6 +15,7 @@ from agent_forge.executor import (
     StepResult,
     StepStatus,
 )
+from agent_forge.models.base import ModelResponse
 from agent_forge.monitor import Monitor
 from agent_forge.tools.function import FunctionTool
 from tests.conftest import MockModel
@@ -410,6 +411,128 @@ class TestCostTracking:
         # Each one-step execution should add only its own plan_start checkpoint.
         assert checkpoints_after_first == 1
         assert len(state_manager.checkpoints) == 2
+
+
+class TestStepTimeouts:
+    """Tests for per-step execution timeouts."""
+
+    @pytest.mark.asyncio
+    async def test_async_tool_timeout_fails_recoverably(
+        self, state_manager: StateManager
+    ) -> None:
+        """A slow tool should fail the step without hanging execution."""
+        import asyncio
+
+        async def slow_tool() -> dict[str, str]:
+            await asyncio.sleep(10)
+            return {"ran": "yes"}
+
+        tool = FunctionTool(fn=slow_tool, name="slow_tool")
+        monitor = Monitor(state_manager=state_manager)
+        backtrack = BacktrackEngine(state_manager=state_manager)
+        executor = Executor(
+            state_manager=state_manager,
+            monitor=monitor,
+            backtrack_engine=backtrack,
+            tools={"slow_tool": tool},
+            step_timeout_seconds=0.01,
+        )
+        step = PlanStep(id="slow", description="slow", action="slow_tool")
+
+        result = await executor.execute_plan(steps=[step], invariants=[])
+
+        assert result.success is False
+        assert result.recoverable is True
+        assert result.steps_completed == 0
+        assert "timed out after 0.01s" in result.error
+        assert step.status == StepStatus.FAILED
+        assert state_manager.get("ran") is None
+
+    @pytest.mark.asyncio
+    async def test_model_timeout_fails_before_cost_is_counted(
+        self, state_manager: StateManager
+    ) -> None:
+        """A slow LLM call should be bounded by the configured timeout."""
+        import asyncio
+
+        class SlowModel(MockModel):
+            async def generate(
+                self,
+                messages: list[dict[str, str]],
+                tools: list[dict[str, Any]] | None = None,
+                **kwargs: Any,
+            ) -> ModelResponse:
+                await asyncio.sleep(10)
+                return await super().generate(messages, tools=tools, **kwargs)
+
+        monitor = Monitor(state_manager=state_manager)
+        backtrack = BacktrackEngine(state_manager=state_manager)
+        executor = Executor(
+            state_manager=state_manager,
+            monitor=monitor,
+            backtrack_engine=backtrack,
+            model=SlowModel(),
+            step_timeout_seconds=0.01,
+        )
+
+        result = await executor.execute_plan(
+            steps=[PlanStep(id="llm-slow", description="slow LLM step")],
+            invariants=[],
+        )
+
+        assert result.success is False
+        assert "Step 'llm-slow' timed out after 0.01s" in result.error
+        assert result.model_calls == 0
+        assert result.total_tokens == 0
+
+    @pytest.mark.asyncio
+    async def test_stream_plan_emits_timeout_failure(
+        self, state_manager: StateManager
+    ) -> None:
+        """Timeouts should surface as terminal stream failure events."""
+        import asyncio
+
+        async def slow_tool() -> dict[str, str]:
+            await asyncio.sleep(10)
+            return {"ran": "yes"}
+
+        tool = FunctionTool(fn=slow_tool, name="slow_tool")
+        monitor = Monitor(state_manager=state_manager)
+        backtrack = BacktrackEngine(state_manager=state_manager)
+        executor = Executor(
+            state_manager=state_manager,
+            monitor=monitor,
+            backtrack_engine=backtrack,
+            tools={"slow_tool": tool},
+            step_timeout_seconds=0.01,
+        )
+
+        events = [
+            event
+            async for event in executor.stream_plan(
+                steps=[PlanStep(id="slow", description="slow", action="slow_tool")],
+                invariants=[],
+            )
+        ]
+
+        assert events[-1].event == "plan_failed"
+        assert events[-1].status == StepStatus.FAILED
+        assert events[-1].error is not None
+        assert "Step 'slow' timed out after 0.01s" in events[-1].error
+        assert events[-1].terminal is True
+
+    def test_timeout_must_be_positive(self, state_manager: StateManager) -> None:
+        """Timeout configuration should reject non-positive values."""
+        monitor = Monitor(state_manager=state_manager)
+        backtrack = BacktrackEngine(state_manager=state_manager)
+
+        with pytest.raises(ValueError, match="step_timeout_seconds must be positive"):
+            Executor(
+                state_manager=state_manager,
+                monitor=monitor,
+                backtrack_engine=backtrack,
+                step_timeout_seconds=0,
+            )
 
 
 class TestExecutionResultSerialization:
