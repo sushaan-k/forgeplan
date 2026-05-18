@@ -7,9 +7,11 @@ It coordinates with the Monitor and BacktrackEngine to handle failures.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 import uuid
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from enum import StrEnum
 from typing import Any, TypedDict
 
@@ -144,6 +146,19 @@ class StepResult(BaseModel):
     steps_total: int
     status: StepStatus
     result: Any = None
+
+
+class ExecutionEvent(BaseModel):
+    """Structured streaming event emitted during plan execution."""
+
+    event: str
+    step_id: str | None = None
+    step_description: str | None = None
+    step_index: int | None = None
+    steps_total: int | None = None
+    status: StepStatus | None = None
+    result: Any = None
+    error: str | None = None
 
 
 # Type alias for the step-complete callback.
@@ -399,6 +414,70 @@ class Executor:
             final_state=self._state_manager.current_state,
             **self._cost_fields(),
         )
+
+    async def stream_plan(
+        self,
+        steps: list[PlanStep],
+        invariants: list[str],
+        max_steps: int | None = None,
+    ) -> AsyncIterator[ExecutionEvent]:
+        """Execute a plan and stream lifecycle events as it progresses."""
+        queue: asyncio.Queue[ExecutionEvent] = asyncio.Queue()
+        total_steps = self._count_steps(steps)
+
+        def on_step_complete(step_result: StepResult) -> None:
+            queue.put_nowait(
+                ExecutionEvent(
+                    event="step_completed",
+                    step_id=step_result.step_id,
+                    step_description=step_result.step_description,
+                    step_index=step_result.step_index,
+                    steps_total=step_result.steps_total,
+                    status=step_result.status,
+                    result=step_result.result,
+                )
+            )
+
+        async def _runner() -> ExecutionResult:
+            return await self.execute_plan(
+                steps=steps,
+                invariants=invariants,
+                max_steps=max_steps,
+                on_step_complete=on_step_complete,
+            )
+
+        task = asyncio.create_task(_runner())
+        yield ExecutionEvent(
+            event="plan_started",
+            step_index=0,
+            steps_total=total_steps,
+            status=StepStatus.PENDING,
+        )
+
+        try:
+            while True:
+                if task.done() and queue.empty():
+                    break
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=0.05)
+                except TimeoutError:
+                    continue
+                yield event
+
+            result = await task
+            yield ExecutionEvent(
+                event="plan_completed" if result.success else "plan_failed",
+                step_index=result.steps_completed,
+                steps_total=result.steps_total,
+                status=StepStatus.COMPLETED if result.success else StepStatus.FAILED,
+                result=result.final_state,
+                error=result.error or None,
+            )
+        finally:
+            if not task.done():
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
 
     async def _execute_step(self, step: PlanStep) -> Any:
         """Execute a single plan step.

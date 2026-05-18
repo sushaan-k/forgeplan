@@ -27,7 +27,13 @@ from agent_forge.exceptions import (
     StateError,
     ToolError,
 )
-from agent_forge.executor import ExecutionResult, Executor, PlanStep, StepResult
+from agent_forge.executor import (
+    ExecutionEvent,
+    ExecutionResult,
+    Executor,
+    PlanStep,
+    StepResult,
+)
 from agent_forge.goal import Goal, GoalStatus
 from agent_forge.monitor import CheckResult, Monitor, MonitorVerdict
 from agent_forge.planner import (
@@ -54,6 +60,7 @@ __all__ = [
     "CheckResult",
     "Checkpoint",
     "ExecutionError",
+    "ExecutionEvent",
     "ExecutionResult",
     "Executor",
     "FunctionTool",

@@ -8,6 +8,7 @@ import pytest
 
 from agent_forge.backtrack import BacktrackEngine
 from agent_forge.executor import (
+    ExecutionEvent,
     ExecutionResult,
     Executor,
     PlanStep,
@@ -196,6 +197,95 @@ class TestOnStepCompleteCallback:
         steps = [PlanStep(description="No callback step")]
         result = await executor.execute_plan(steps=steps, invariants=[])
         assert result.success is True
+
+    @pytest.mark.asyncio
+    async def test_stream_plan_emits_lifecycle_events(self, executor: Executor) -> None:
+        """stream_plan should emit start, step, and completion events."""
+        steps = [
+            PlanStep(id="a", description="Step A"),
+            PlanStep(id="b", description="Step B"),
+        ]
+
+        events = [
+            event async for event in executor.stream_plan(steps=steps, invariants=[])
+        ]
+
+        assert isinstance(events[0], ExecutionEvent)
+        assert events[0].event == "plan_started"
+        assert [
+            event.step_id for event in events if event.event == "step_completed"
+        ] == [
+            "a",
+            "b",
+        ]
+        assert events[-1].event == "plan_completed"
+        assert events[-1].status == StepStatus.COMPLETED
+
+    @pytest.mark.asyncio
+    async def test_stream_plan_cancels_when_consumer_stops(
+        self, state_manager: StateManager
+    ) -> None:
+        """Breaking out of the event stream should cancel execution."""
+        import asyncio
+
+        async def slow_tool() -> dict[str, str]:
+            await asyncio.sleep(10)
+            return {"ran": "yes"}
+
+        tool = FunctionTool(fn=slow_tool, name="slow_tool")
+        monitor = Monitor(state_manager=state_manager)
+        backtrack = BacktrackEngine(state_manager=state_manager)
+        executor = Executor(
+            state_manager=state_manager,
+            monitor=monitor,
+            backtrack_engine=backtrack,
+            tools={"slow_tool": tool},
+        )
+
+        stream = executor.stream_plan(
+            steps=[PlanStep(description="slow", action="slow_tool")],
+            invariants=[],
+        )
+        event = await anext(stream)
+        assert event.event == "plan_started"
+        await stream.aclose()
+
+        await asyncio.sleep(0)
+        assert state_manager.get("ran") is None
+
+    @pytest.mark.asyncio
+    async def test_stream_plan_emits_failure_event(
+        self, state_manager: StateManager
+    ) -> None:
+        """Failures should be exposed as terminal stream events."""
+
+        def fail_tool() -> None:
+            raise RuntimeError("boom")
+
+        tool = FunctionTool(fn=fail_tool, name="fail_tool")
+        monitor = Monitor(state_manager=state_manager)
+        backtrack = BacktrackEngine(state_manager=state_manager)
+        executor = Executor(
+            state_manager=state_manager,
+            monitor=monitor,
+            backtrack_engine=backtrack,
+            tools={"fail_tool": tool},
+        )
+
+        events = [
+            event
+            async for event in executor.stream_plan(
+                steps=[PlanStep(id="bad", description="bad", action="fail_tool")],
+                invariants=[],
+            )
+        ]
+
+        assert events[-1].event == "plan_failed"
+        assert events[-1].status == StepStatus.FAILED
+        assert events[-1].step_index == 0
+        assert events[-1].steps_total == 1
+        assert events[-1].error is not None
+        assert "boom" in events[-1].error
 
 
 class TestCostTracking:
