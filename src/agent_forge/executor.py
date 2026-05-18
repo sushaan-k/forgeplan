@@ -159,6 +159,21 @@ class ExecutionEvent(BaseModel):
     status: StepStatus | None = None
     result: Any = None
     error: str | None = None
+    progress_pct: float = 0.0
+    terminal: bool = False
+
+    def model_post_init(self, __context: Any) -> None:
+        """Populate derived event fields for structured stream payloads."""
+        self.terminal = self.event in {"plan_completed", "plan_failed"}
+        if self.terminal and self.event == "plan_completed":
+            self.progress_pct = 100.0
+            return
+        if not self.steps_total:
+            self.progress_pct = 0.0
+            return
+        self.progress_pct = round(
+            ((self.step_index or 0) / self.steps_total) * 100.0, 1
+        )
 
 
 # Type alias for the step-complete callback.

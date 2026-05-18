@@ -220,6 +220,31 @@ class TestOnStepCompleteCallback:
         ]
         assert events[-1].event == "plan_completed"
         assert events[-1].status == StepStatus.COMPLETED
+        assert events[-1].terminal is True
+        assert events[-1].progress_pct == 100.0
+        dumped = events[-1].model_dump()
+        assert dumped["terminal"] is True
+        assert dumped["progress_pct"] == 100.0
+
+    @pytest.mark.asyncio
+    async def test_stream_plan_completed_progress_with_invalidated_step(
+        self, executor: Executor
+    ) -> None:
+        """Terminal success should report complete progress even with skipped steps."""
+        steps = [
+            PlanStep(id="a", description="Step A"),
+            PlanStep(id="skip", description="Skip", status=StepStatus.INVALIDATED),
+            PlanStep(id="b", description="Step B"),
+        ]
+
+        events = [
+            event async for event in executor.stream_plan(steps=steps, invariants=[])
+        ]
+
+        assert events[-1].event == "plan_completed"
+        assert events[-1].step_index == 2
+        assert events[-1].steps_total == 3
+        assert events[-1].progress_pct == 100.0
 
     @pytest.mark.asyncio
     async def test_stream_plan_cancels_when_consumer_stops(
@@ -248,6 +273,7 @@ class TestOnStepCompleteCallback:
         )
         event = await anext(stream)
         assert event.event == "plan_started"
+        assert event.progress_pct == 0.0
         await stream.aclose()
 
         await asyncio.sleep(0)
@@ -286,6 +312,7 @@ class TestOnStepCompleteCallback:
         assert events[-1].steps_total == 1
         assert events[-1].error is not None
         assert "boom" in events[-1].error
+        assert events[-1].terminal is True
 
 
 class TestCostTracking:
